@@ -1,0 +1,7 @@
+{
+  "name": "Gemini Voice Knowledge Bot",
+  "description": "An AI voice assistant that answers questions based on uploaded PDF knowledge bases using Gemini Live API.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
