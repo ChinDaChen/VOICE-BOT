@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Modality, LiveServerMessage } from '@google/genai';
 import { KnowledgeFile, SessionStatus } from './types';
@@ -7,7 +8,7 @@ import AIAvatar from './components/AIAvatar';
 declare var google: any;
 declare var gapi: any;
 
-// 請確保此 ID 與 Google Cloud Console 中的「已授權來源」網址一致
+// 您的 Google Client ID
 const CLIENT_ID = '5918080408-j58nta6v9ib3h9sbaoghkjk03h7ofp5k.apps.googleusercontent.com'; 
 const SCOPES = 'https://www.googleapis.com/auth/drive.readonly';
 
@@ -31,7 +32,7 @@ const App: React.FC = () => {
   useEffect(() => {
     generateAvatar();
     const initGapi = () => {
-      if (typeof gapi !== 'undefined') {
+      if (typeof gapi !== 'undefined' && typeof google !== 'undefined') {
         gapi.load('picker', { 'callback': () => console.log('Picker API Ready') });
       } else {
         setTimeout(initGapi, 500);
@@ -44,15 +45,15 @@ const App: React.FC = () => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const prompt = context 
-        ? `A futuristic AI bot head, sleek design, blue glow, knowledge expert in ${context}.` 
-        : `A friendly professional AI assistant portrait, glassmorphism style.`;
+        ? `A high-tech cinematic portrait of an AI robot specialist in ${context}, neon blue lighting, digital background.` 
+        : `A professional and friendly AI assistant avatar, minimalist crystal style.`;
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { parts: [{ text: prompt }] },
       });
       const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
       if (part?.inlineData?.data) setAvatarUrl(`data:image/png;base64,${part.inlineData.data}`);
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Avatar Gen Error:", e); }
   };
 
   const handleGoogleDriveAction = () => {
@@ -68,7 +69,8 @@ const App: React.FC = () => {
         callback: async (response: any) => {
           if (response.error !== undefined) {
             setIsProcessing(false);
-            console.error(response);
+            console.error("Auth Error:", response);
+            alert(`授權失敗: ${response.error}`);
             return;
           }
           createPicker(response.access_token);
@@ -77,7 +79,7 @@ const App: React.FC = () => {
       tokenClient.requestAccessToken({ prompt: 'consent' });
     } catch (err) {
       setIsProcessing(false);
-      alert("Google 授權失敗，請檢查 Cloud Console 的 JavaScript 來源設定。");
+      alert("Google 授權初始化失敗，請確認已在 Cloud Console 加入目前的網址作為授權來源。");
     }
   };
 
@@ -99,6 +101,7 @@ const App: React.FC = () => {
       picker.setVisible(true);
     } catch (err) {
       setIsProcessing(false);
+      console.error("Picker Error:", err);
     }
   };
 
@@ -107,6 +110,7 @@ const App: React.FC = () => {
       const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
         headers: { 'Authorization': `Bearer ${accessToken}` }
       });
+      if (!response.ok) throw new Error("Fetch failed");
       const blob = await response.blob();
       const base64Data = await new Promise<string>((resolve) => {
         const reader = new FileReader();
@@ -117,15 +121,15 @@ const App: React.FC = () => {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const res = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
-        contents: { parts: [{ inlineData: { data: base64Data, mimeType: 'application/pdf' } }, { text: "Summarize knowledge." }] },
+        contents: { parts: [{ inlineData: { data: base64Data, mimeType: 'application/pdf' } }, { text: "Provide a detailed summary and extract key facts from this PDF for a knowledge base." }] },
       });
 
-      setFiles(prev => [...prev, { id: fileId, name: fileName, content: res.text || "", size: blob.size }]);
+      setFiles(prev => [...prev, { id: fileId, name: fileName, content: res.text || "No content extracted.", size: blob.size }]);
       setIsProcessing(false);
       generateAvatar(fileName);
     } catch (err) {
       setIsProcessing(false);
-      alert("讀取檔案失敗。");
+      alert("讀取雲端檔案失敗，請確保已在 Google Cloud 啟用 Drive API。");
     }
   };
 
@@ -140,12 +144,13 @@ const App: React.FC = () => {
       try {
         const res = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
-          contents: { parts: [{ inlineData: { data: base64Data, mimeType: file.type } }, { text: "Summarize knowledge from this PDF." }] },
+          contents: { parts: [{ inlineData: { data: base64Data, mimeType: file.type } }, { text: "Summarize everything in this document clearly." }] },
         });
         setFiles(prev => [...prev, { id: Math.random().toString(), name: file.name, content: res.text || "", size: file.size }]);
         generateAvatar(file.name);
       } catch (err) {
-        alert("PDF 處理失敗。");
+        console.error(err);
+        alert("PDF 處理失敗，請檢查 API Key 是否正確。");
       }
       setIsProcessing(false);
     };
@@ -159,8 +164,19 @@ const App: React.FC = () => {
     
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const context = files.map(f => `FILE: ${f.name}\nCONTENT: ${f.content}`).join('\n\n');
-      const systemInstruction = `You are a Knowledge Expert. Context:\n${context}\n\nRules: 1. Keep answers short. 2. No markdown. 3. If the user asks a question, use the context to answer. 4. Be friendly.`;
+      const context = files.length > 0 
+        ? files.map(f => `[DOCUMENT: ${f.name}]\n${f.content}`).join('\n\n')
+        : "No documents uploaded yet.";
+      
+      const systemInstruction = `You are a Knowledge Expert AI. 
+      CURRENT KNOWLEDGE BASE:
+      ${context}
+
+      INSTRUCTIONS:
+      1. Use the provided knowledge base to answer questions.
+      2. If the answer is not in the documents, say you don't know based on the files.
+      3. Keep responses concise (max 3 sentences).
+      4. Use a natural, friendly tone. No markdown or special symbols.`;
       
       const audioContextOut = new AudioContext({ sampleRate: 24000 });
       audioContextOutRef.current = audioContextOut;
@@ -192,12 +208,10 @@ const App: React.FC = () => {
             scriptProcessor.connect(audioContextIn.destination);
 
             if (initialMsg) {
-              // Fixed: Using 'any' cast as the 'send' method might be missing from the Session type definition in the current SDK version
               sessionPromise.then(s => (s as any).send({ parts: [{ text: initialMsg }] }));
             }
           },
           onmessage: async (msg: LiveServerMessage) => {
-            // 處理語音
             const base64Audio = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (base64Audio) {
               setIsModelTalking(true);
@@ -215,31 +229,32 @@ const App: React.FC = () => {
               sourcesRef.current.add(source);
             }
 
-            // 處理文字回覆 (逐字顯示)
             if (msg.serverContent?.outputTranscription) {
               const newText = msg.serverContent.outputTranscription.text;
               setCurrentResponse(prev => prev + newText);
             }
 
-            // 當回合結束時，不立即清除文字，讓使用者看清楚
-            if (msg.serverContent?.turnComplete) {
-              console.log("Turn complete");
-            }
-
             if (msg.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => s.stop());
+              sourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
               sourcesRef.current.clear();
               setIsModelTalking(false);
-              setCurrentResponse('Conversation interrupted...');
             }
           },
-          onclose: () => setStatus(SessionStatus.IDLE),
-          onerror: (e) => { console.error(e); setStatus(SessionStatus.ERROR); }
+          onclose: () => {
+            setStatus(SessionStatus.IDLE);
+            setIsModelTalking(false);
+          },
+          onerror: (e) => { 
+            console.error("Session Error:", e); 
+            setStatus(SessionStatus.ERROR); 
+          }
         }
       });
       sessionRef.current = await sessionPromise;
     } catch (e) {
+      console.error("Start Session Error:", e);
       setStatus(SessionStatus.ERROR);
+      alert("無法啟動語音工作階段，請確認麥克風權限。");
     }
   };
 
@@ -250,11 +265,10 @@ const App: React.FC = () => {
     const msg = inputText;
     setInputText('');
     setLastUserText(msg);
-    setCurrentResponse(''); // 發送新訊息時才清空舊回答
+    setCurrentResponse('');
 
     if (sessionRef.current && status === SessionStatus.ACTIVE) {
-      // 透過 Live API 發送文字部分
-      sessionRef.current.send({ parts: [{ text: msg }] });
+      (sessionRef.current as any).send({ parts: [{ text: msg }] });
     } else {
       startVoiceSession(msg);
     }
@@ -287,7 +301,7 @@ const App: React.FC = () => {
                 className="bg-slate-800/40 hover:bg-slate-700/60 p-3 rounded-xl border border-slate-700/50 flex items-center gap-3 transition-all disabled:opacity-50"
               >
                 {isProcessing ? <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent animate-spin rounded-full" /> : <svg className="w-4 h-4 text-indigo-400" fill="currentColor" viewBox="0 0 24 24"><path d="M12.5 5H11v4H7v1.5h4V15h1.5v-4.5h4V9h-4V5z"/></svg>}
-                <span className="text-xs">{isProcessing ? 'Connecting...' : 'Google Drive'}</span>
+                <span className="text-xs">{isProcessing ? 'Processing...' : 'Google Drive'}</span>
               </button>
             </div>
           </section>
@@ -305,6 +319,10 @@ const App: React.FC = () => {
             </div>
           </section>
         </div>
+        
+        <div className="mt-4 pt-4 border-t border-slate-800">
+           <p className="text-[9px] text-slate-600 text-center uppercase tracking-tighter">Powered by Gemini 2.5 Live</p>
+        </div>
       </aside>
 
       <main className="flex-1 relative flex flex-col items-center justify-center p-6">
@@ -312,11 +330,11 @@ const App: React.FC = () => {
            <AIAvatar imageUrl={avatarUrl} isTalking={isModelTalking} isListening={status === SessionStatus.ACTIVE} />
         </div>
         
-        <div className="mt-8 h-32 flex flex-col items-center justify-center text-center max-w-2xl z-10 px-4">
+        <div className="mt-8 h-40 flex flex-col items-center justify-center text-center max-w-2xl z-10 px-4">
           {lastUserText && <p className="text-blue-400/60 text-sm mb-3 italic animate-pulse">"{lastUserText}"</p>}
-          <div className="min-h-[1.5rem]">
+          <div className="min-h-[2rem]">
             <p className="text-xl md:text-2xl font-medium leading-relaxed bg-gradient-to-b from-white to-slate-400 bg-clip-text text-transparent">
-              {currentResponse || (status === SessionStatus.ACTIVE ? "Listening to your voice..." : "Voice Knowledge Bot Ready")}
+              {currentResponse || (status === SessionStatus.ACTIVE ? "Listening..." : status === SessionStatus.CONNECTING ? "Connecting to AI..." : "Ready to Answer from PDF")}
             </p>
           </div>
         </div>
@@ -327,7 +345,7 @@ const App: React.FC = () => {
               type="text" 
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Type your question..."
+              placeholder="Ask a question about your files..."
               className="flex-1 bg-transparent border-none focus:ring-0 text-sm px-4 py-3 text-white placeholder-slate-500"
             />
             <button type="submit" className="px-5 bg-blue-600 rounded-xl hover:bg-blue-500 transition-all flex items-center justify-center shadow-lg active:scale-95">
@@ -351,6 +369,13 @@ const App: React.FC = () => {
               }
             </button>
             <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">
-              {status === SessionStatus.ACTIVE ? 'Session Active' : 'Start Voice Chat'}
+              {status === SessionStatus.ACTIVE ? 'End Session' : 'Start Voice Chat'}
             </p>
           </div>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default App;
